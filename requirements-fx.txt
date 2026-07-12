@@ -1,0 +1,11 @@
+# Optional: the `fx` anti-detect Firefox browser tool.
+# None of the other tools need this. The server starts fine without it - fx just
+# returns a clear "not installed" error until you add it.
+#
+# Install:
+#     pip install -r requirements-fx.txt
+#     python -m camoufox fetch      # one-time ~150MB patched Firefox download
+#
+# camoufox pulls in playwright + browserforge as transitive dependencies.
+
+camoufox[geoip]

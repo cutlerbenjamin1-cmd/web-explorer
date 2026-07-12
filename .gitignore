@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# camoufox persistent profile + local state (keep the dir, ignore contents)
+data/*
+!data/.gitkeep
+
+# content saved by harvest=True (keep the dir, ignore contents)
+harvested/*
+!harvested/.gitkeep
+
+# mcp-http-bridge live filter (only if you run it over HTTP)
+http_tools.json
+
+# logs, editors, OS cruft
+*.log
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,23 @@
+# web-explorer core dependencies.
+# These cover the server and the free-API tools: web, wiki, wikidata, github, youtube.
+# The fx anti-detect browser is optional; see requirements-fx.txt.
+
+mcp>=1.2.0
+
+# HTTP client used by every tool
+httpx
+
+# web(search) - DuckDuckGo
+ddgs
+
+# web(crawl) + fx(read) content extraction
+trafilatura
+beautifulsoup4
+lxml
+
+# youtube transcripts + metadata
+youtube-transcript-api
+yt-dlp
+
+# wiki
+Wikipedia-API

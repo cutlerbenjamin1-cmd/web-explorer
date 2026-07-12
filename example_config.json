@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "web-explorer": {
+      "command": "python",
+      "args": ["/absolute/path/to/web-explorer/server.py"]
+    }
+  }
+}
