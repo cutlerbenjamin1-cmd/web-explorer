@@ -2,7 +2,7 @@
 # These cover the server and the free-API tools: web, wiki, wikidata, github, youtube.
 # The fx anti-detect browser is optional; see requirements-fx.txt.
 
-mcp>=1.2.0
+mcp>=1.2.0,<2
 
 # HTTP client used by every tool
 httpx

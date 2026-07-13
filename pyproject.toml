@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "web-explorer"
+version = "1.0.0"
+description = "MCP server for external web tools: search + crawl, an anti-detect browser, Wikipedia, Wikidata, GitHub, and YouTube transcripts."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "cutlerbenjamin1-cmd" }]
+keywords = ["mcp", "model-context-protocol", "web-search", "crawler", "wikipedia", "youtube"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "mcp>=1.2.0,<2",
+    "httpx",
+    "ddgs",
+    "trafilatura",
+    "beautifulsoup4",
+    "lxml",
+    "youtube-transcript-api",
+    "yt-dlp",
+    "Wikipedia-API",
+]
+
+[project.optional-dependencies]
+# fx(): the anti-detect Firefox browser for bot-protected sites. After install,
+# run `python -m camoufox fetch` once to download the patched Firefox (~150MB).
+fx = ["camoufox[geoip]"]
+
+[project.scripts]
+web-explorer = "server:run"
+
+[project.urls]
+Homepage = "https://github.com/cutlerbenjamin1-cmd/web-explorer"
+Repository = "https://github.com/cutlerbenjamin1-cmd/web-explorer"
+
+[tool.setuptools]
+py-modules = ["server"]
+packages = ["tools"]

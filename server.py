@@ -603,7 +603,8 @@ async def main():
         await server.run(read_stream, write_stream, init)
 
 
-if __name__ == "__main__":
+def run():
+    """Console-script entry point (sync wrapper around the async server)."""
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
@@ -614,3 +615,7 @@ if __name__ == "__main__":
             f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {e}\n")
             f.write(traceback.format_exc() + "\n")
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    run()

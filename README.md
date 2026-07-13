@@ -100,6 +100,14 @@ summary come back. Point `HARVEST_ROOT` at a different directory if you want.
 
 Python 3.10 or newer.
 
+Install as a package to get a `web-explorer` command on your PATH:
+
+```
+pipx install git+https://github.com/cutlerbenjamin1-cmd/web-explorer
+```
+
+From a local checkout: `pip install .` Or just install the dependencies and run `server.py` directly:
+
 ```
 pip install -r requirements.txt
 ```
@@ -114,7 +122,7 @@ the other tools work fine without it; `fx` just returns a clear "not installed"
 message until you add it.
 
 ```
-pip install -r requirements-fx.txt
+pip install -r requirements-fx.txt   # or: pip install "web-explorer[fx]"
 python -m camoufox fetch
 ```
 
@@ -123,7 +131,19 @@ python -m camoufox fetch
 
 ## Use it with an MCP client
 
-Speaks MCP over stdio. Point your client at `server.py`:
+Speaks MCP over stdio. If you installed the package, point your client at the `web-explorer` command:
+
+```json
+{
+  "mcpServers": {
+    "web-explorer": {
+      "command": "web-explorer"
+    }
+  }
+}
+```
+
+Otherwise point `python` at `server.py` with an absolute path:
 
 ```json
 {
