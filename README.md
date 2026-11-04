@@ -76,8 +76,15 @@ DELETE, DROP, and so on) are rejected.
 - `search` - code search (requires a token).
 - Issues: `get_issue`, `list_issues`, `create_issue`, `comment_issue`,
   `update_issue`. The write actions require a token. See Credentials.
+- `search` is scoped with `owner` and `repo`. `list_issues` excludes pull requests.
 
-Cached for 10 minutes.
+Anything too long for one response comes back in pages: when a response has
+`has_more: true`, call again with its `next_offset` and `next_char_offset`. In
+`get_issue`, offset 0 is the issue body and n is the nth comment, and a comment too
+big for one response is split across pages.
+
+File reads are cached for 10 minutes, and GitHub can serve a branch up to 5 minutes
+behind a push, so pass a commit SHA as `ref` for exact content.
 
 ### `youtube`
 
@@ -172,7 +179,9 @@ browser.
 - **SSRF protection.** `web(crawl)` refuses private and loopback address ranges,
   so a crawled URL cannot be pointed back at your internal network.
 - **Polite rate limiting.** Per-tool cooldowns space out requests so you do not
-  hammer a host from your own IP and trip a 429.
+  hammer a host from your own IP and trip a 429. Parallel calls queue for their
+  slot instead of failing, and a call is only rejected once more than 30 seconds of
+  calls are already waiting.
 - **The `fx` profile is real browser state.** `fx` keeps a persistent Firefox
   profile at `data/fx_profile/`. Anything you do in it sticks: if you sign into a
   site through `fx`, that session and its cookies are written to disk there in the
@@ -215,7 +224,7 @@ Every variable below is optional.
 | `YOUTUBE_BIND_IP` | Local source IP to bind outbound YouTube requests to. |
 | `MCP_DEBUG` | Set to `true` for stderr debug logging. |
 | `OUTPUT_MAX_CHARS` | Hard cap on a single tool response. Default: 15000. |
-| `GITHUB_MAX_RESPONSE_BYTES` | Max GitHub file size fetched. Default: about 2MB. |
+| `GITHUB_MAX_RESPONSE_BYTES` | Max GitHub file size returned inline. Default: about 2MB. With `harvest=True`, files up to 100MB are saved to disk. |
 | `WEB_CRAWL_MAX_BYTES` | Max HTML or text size for `web(crawl)`. Default: about 2MB. |
 | `WEB_CRAWL_MAX_PDF_BYTES` | Max PDF size for `web(crawl)`. Default: about 50MB. |
 

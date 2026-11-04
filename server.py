@@ -21,7 +21,7 @@ import json
 import logging
 import tempfile
 import traceback
-from typing import Dict, Tuple, Callable, List, Any
+from typing import Dict, Tuple, Callable, List, Any, Optional
 
 DEBUG_MODE = os.getenv("MCP_DEBUG", "false").lower() == "true"
 
@@ -142,10 +142,11 @@ def _truncate_content_field(content: str, max_chars: int) -> tuple:
 
     tail_start = total - tail_size if tail_size > 0 else total
     omitted = total - head_size - (tail_size if tail_size > 0 else 0)
+    head_end_line = content.count("\n", 0, head_size) + 1
     marker = (
         f"\n\n... [{omitted:,} chars omitted | "
         f"showing 0:{head_size:,} + {tail_start:,}:{total:,} | "
-        f"resume offset {head_size}] ...\n\n"
+        f"head ends at char {head_size:,}, line {head_end_line:,} of this output] ...\n\n"
     )
 
     trunc_info = {
@@ -227,13 +228,14 @@ def _truncate_output(payload: dict, tool_name: str = "") -> dict:
     }
 
     # Include key metadata fields
-    for key in ["path", "action", "mode", "exit_code", "total_lines", "size", "query", "count", "_security"]:
+    for key in ["path", "root", "action", "mode", "exit_code", "total_lines", "size", "query", "pattern", "count", "files_matched", "files_searched", "_security"]:
         if key in payload:
             truncated_payload[key] = payload[key]
 
     # For list results (search, docs_hybrid, etc): fit as many as possible within budget
-    if "results" in payload and isinstance(payload["results"], list) and len(payload["results"]) > 0:
-        all_results = payload["results"]
+    list_key = next((k for k in ("results", "items", "matches") if isinstance(payload.get(k), list) and payload[k]), None)
+    if list_key:
+        all_results = payload[list_key]
         max_snippet = 300
 
         # Trim individual results: cap snippet/title length to deflate bloated DDG entries
@@ -252,7 +254,7 @@ def _truncate_output(payload: dict, tool_name: str = "") -> dict:
 
         # Pack as many trimmed results as fit within budget
         envelope = truncated_payload.copy()
-        envelope["results"] = []
+        envelope[list_key] = []
         envelope["note"] = ""
         envelope_overhead = len(json.dumps(envelope, ensure_ascii=False))
         budget = OUTPUT_MAX_CHARS - envelope_overhead - 200
@@ -260,31 +262,43 @@ def _truncate_output(payload: dict, tool_name: str = "") -> dict:
         fitted = []
         used = 0
         for r in trimmed:
-            entry_size = len(json.dumps(r, ensure_ascii=False))
+            # +2 for the ", " separator, which adds up over a long list of short entries.
+            entry_size = len(json.dumps(r, ensure_ascii=False)) + 2
             if used + entry_size > budget:
                 break
             fitted.append(r)
             used += entry_size
 
-        truncated_payload["results"] = fitted
-        total = len(all_results)
-        shown = len(fitted)
-        if shown < total:
-            truncated_payload["note"] = f"{shown} of {total} results shown (trimmed to fit {OUTPUT_MAX_CHARS} char limit)."
-        return truncated_payload
+        # Nothing fitted means a single oversized entry, which the preview below still covers.
+        if fitted:
+            truncated_payload[list_key] = fitted
+            total = len(all_results)
+            shown = len(fitted)
+            if shown < total:
+                truncated_payload["note"] = f"{shown} of {total} results shown (trimmed to fit {OUTPUT_MAX_CHARS} char limit)."
+                # grep sets truncated itself when it hits max_results, so the total above isn't the real total.
+                if payload.get("truncated") is True:
+                    truncated_payload["note"] += " The search also stopped at its own result limit, so there may be more."
+            return truncated_payload
 
     # Calculate space for preview (non-search fallback)
-    truncated_payload["note"] = "Response too large. Use offset/limit for chunked reads, or summary=True for web content."
+    current_text = json.dumps(payload, ensure_ascii=False)
+    content_text = next(
+        (payload[f] for f in content_fields if isinstance(payload.get(f), str) and len(payload[f]) * 2 >= len(current_text)),
+        None,
+    )
+    truncated_payload["note"] = (
+        "Response too large. preview holds the head and tail of the raw JSON."
+        if content_text is None
+        else "Response too large. Use offset/limit for chunked reads, or summary=True for web content."
+    )
     envelope_size = len(json.dumps(truncated_payload, ensure_ascii=False))
     available_chars = OUTPUT_MAX_CHARS - envelope_size - 100
 
     if available_chars > 500:
-        # Find the main content field
-        for field in content_fields:
-            if field in payload and isinstance(payload[field], str):
-                preview, _, _ = _truncate_content_field(payload[field], available_chars)
-                truncated_payload["preview"] = preview
-                break
+        # When no top-level text field holds most of the data it's nested, so preview the JSON instead.
+        preview, _, _ = _truncate_content_field(current_text if content_text is None else content_text, available_chars)
+        truncated_payload["preview"] = preview
 
     return truncated_payload
 
@@ -384,13 +398,15 @@ _TOOL_REGISTRY.register(
     name="github",
     func=github_fetch.github,
     description=(
-        "GitHub file and repo access via API. Returns {success, content/stats/results}. "
+        "GitHub file and repo access via API. Returns {success, content/stats/items}. "
         "Use for: fetching source files, analyzing repo structure, searching code across GitHub. "
-        "Actions: 'fetch' (raw file content), 'analyze' (repo stats/structure), 'search' (code search), "
+        "Actions: 'fetch' (raw file content), 'analyze' (repo stats/structure), 'search' (code search, scope with owner + repo), "
         "'create_issue' (open new issue), 'comment_issue' (add comment), 'get_issue' (read issue + comments), "
-        "'list_issues' (list repo issues), 'update_issue' (edit state/title/body/labels). "
-        "Requires GITHUB_TOKEN env var for write ops and higher rate limits. 2MB response cap, 10min cache. "
-        "For large files, use harvest=True to save to disk instead of loading into context."
+        "'list_issues' (list repo issues, excludes PRs), 'update_issue' (edit state/title/body/labels). "
+        "Long results come back in pages: when a response has has_more=true, call again with its next_offset and next_char_offset. "
+        "fetch reads files up to 2MB inline. Branch reads can lag a push by up to 5 minutes, so pass a commit SHA as ref for exact content. "
+        "Requires GITHUB_TOKEN env var for search, write ops, and higher rate limits. "
+        "For large files, use harvest=True to save to disk (up to 100MB) instead of loading into context."
     ),
     input_schema={
         "type": "object",
@@ -400,18 +416,21 @@ _TOOL_REGISTRY.register(
                 "enum": ["fetch", "analyze", "search", "create_issue", "comment_issue", "get_issue", "list_issues", "update_issue"],
                 "description": "'fetch' for file content, 'analyze' for repo stats, 'search' for code search, 'create_issue'/'comment_issue'/'get_issue'/'list_issues'/'update_issue' for issue management"
             },
-            "owner": {"type": "string", "description": "GitHub username or org (e.g., 'anthropics')"},
-            "repo": {"type": "string", "description": "Repository name (e.g., 'claude-code')"},
+            "owner": {"type": "string", "description": "GitHub username or org (e.g., 'anthropics'). Scopes search when given."},
+            "repo": {"type": "string", "description": "Repository name (e.g., 'claude-code'). Scopes search when given."},
             "path": {"type": "string", "description": "File path within repo (e.g., 'src/main.py'). Required for fetch."},
             "ref": {"type": "string", "description": "Branch, tag, or commit SHA. Default: default branch."},
             "query": {"type": "string", "description": "Code search query. Required for search action."},
             "title": {"type": "string", "description": "Issue title. Required for create_issue."},
-            "body": {"type": "string", "description": "Issue/comment body (markdown). Used by create_issue, comment_issue, update_issue."},
+            "body": {"type": "string", "description": "Issue/comment body (markdown). Used by create_issue, comment_issue, update_issue. An empty string clears the body on update_issue."},
             "issue_number": {"type": "integer", "description": "Issue number. Required for comment_issue, get_issue, update_issue."},
-            "state": {"type": "string", "description": "Issue state: 'open' or 'closed'. Used by list_issues (filter) and update_issue."},
+            "state": {"type": "string", "description": "Issue state. list_issues filter: 'open', 'closed', or 'all'. update_issue: 'open' or 'closed'."},
             "labels": {"type": "array", "items": {"type": "string"}, "description": "Labels array. Used by create_issue, update_issue, list_issues."},
+            "max_results": {"type": "integer", "description": "Results per page for search and list_issues, 1-100. Default: 10."},
+            "offset": {"type": "integer", "description": "Paging position: pass next_offset from the previous response. Used by search, list_issues, and get_issue. In get_issue, 0 is the issue body and n is the nth comment."},
+            "char_offset": {"type": "integer", "description": "Resume inside a long file or comment: pass next_char_offset from the previous response. Used by fetch and get_issue."},
             "harvest": {"type": "boolean", "description": "Save to disk, return metadata only. Saves context tokens."},
-            "harvest_dest": {"type": "string", "description": "Subfolder under harvested/ (e.g., 'github/')."}
+            "harvest_dest": {"type": "string", "description": "Subfolder under harvested/. Default: 'github/'."}
         },
         "required": ["action"]
     }
@@ -537,26 +556,29 @@ async def list_tools():
     return _TOOL_REGISTRY.get_schemas()
 
 
-def check_rate_limit(tool_name: str) -> float:
+MAX_RATE_LIMIT_WAIT_SECONDS = 30.0
+
+
+def claim_rate_limit_slot(tool_name: str) -> Optional[float]:
+    """Reserve the tool's next free slot and return the wait for it, or None if the queue is too long."""
     if tool_name not in RATE_LIMITS:
         return 0
     last_ts, cooldown = RATE_LIMITS[tool_name]
     now = time.time()
-    return max(0, (last_ts + cooldown) - now)
-
-
-def mark_rate_limit(tool_name: str):
-    if tool_name in RATE_LIMITS:
-        _, cooldown = RATE_LIMITS[tool_name]
-        RATE_LIMITS[tool_name] = (time.time(), cooldown)
+    slot = max(now, last_ts + cooldown)
+    if slot - now > MAX_RATE_LIMIT_WAIT_SECONDS:
+        return None
+    RATE_LIMITS[tool_name] = (slot, cooldown)
+    return slot - now
 
 
 async def run_tool(name: str, args: dict):
-    wait = check_rate_limit(name)
+    wait = claim_rate_limit_slot(name)
+    if wait is None:
+        cooldown = RATE_LIMITS[name][1]
+        return [TextContent(type="text", text=json.dumps({"success": False, "error": f"Rate limit: 1 request per {cooldown}s and over {MAX_RATE_LIMIT_WAIT_SECONDS:.0f}s of calls are already queued. Retry shortly."}))]
     if wait > 0:
-        cooldown = RATE_LIMITS.get(name, (0, 0))[1]
-        return [TextContent(type="text", text=json.dumps({"success": False, "error": f"Rate limit: 1 request per {cooldown}s. Retry in {wait:.1f}s."}))]
-    mark_rate_limit(name)
+        await asyncio.sleep(wait)
 
     if name not in TOOL_REGISTRY:
         return [TextContent(type="text", text=json.dumps({"success": False, "error": f"Unknown tool: {name}"}))]
